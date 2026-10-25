@@ -1,5 +1,7 @@
 # power-follow
 
+![Shelly Power Strip Gen4 with slave slots switched on](images/power-strip-gen4.jpg)
+
 A Shelly script for the **Shelly Power Strip Gen4** that makes slave slots follow the power draw of a master slot.
 
 - Master slot draws **more than** the threshold → slave slots switch **on**.
