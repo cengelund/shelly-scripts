@@ -1,0 +1,135 @@
+---
+# Deploy a script from this repo to one or more Shelly Gen2+ devices via the RPC API.
+#
+# Usage:
+#   ansible-playbook -i inventory.yml deploy-script.yml
+#   ansible-playbook -i inventory.yml deploy-script.yml -e script_dir=power-follow -e script_file=power_follow.js
+#   ansible-playbook -i inventory.yml deploy-script.yml --limit strip-office
+#   ansible-playbook -i inventory.yml deploy-script.yml -e verify_reboot=true   # also test start after power-up
+#
+# The script is stored on the device under the name of the file without ".js".
+
+- name: Deploy Shelly script
+  hosts: shelly_strips
+  gather_facts: false
+  vars:
+    script_dir: power-follow
+    script_file: power_follow.js
+    script_name: "{{ script_file | regex_replace('\\.js$', '') }}"
+    script_code: "{{ lookup('file', playbook_dir + '/../scripts/' + script_dir + '/' + script_file) }}"
+    shelly_host: "{{ ansible_host | default(inventory_hostname) }}"
+    chunk_size: 1024
+    start_script: true
+    run_on_startup: true
+    verify_reboot: false   # reboot the device afterwards and check the script comes back on its own
+  tasks:
+    - name: List scripts on device
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc/Script.List"
+        return_content: true
+      register: listed
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Find existing script id
+      ansible.builtin.set_fact:
+        script_id: "{{ listed.json.scripts | selectattr('name', 'equalto', script_name) | map(attribute='id') | list | first | default(none) }}"
+
+    - name: Create script if missing
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc/Script.Create?name={{ script_name }}"
+        return_content: true
+      register: created
+      delegate_to: localhost
+      when: script_id is none
+
+    - name: Use id of new script
+      ansible.builtin.set_fact:
+        script_id: "{{ created.json.id }}"
+      when: script_id is none
+
+    - name: Stop script (code can only be replaced while stopped)
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc/Script.Stop?id={{ script_id }}"
+      delegate_to: localhost
+
+    - name: Upload code in chunks
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          id: 1
+          method: Script.PutCode
+          params:
+            id: "{{ script_id | int }}"
+            code: "{{ item }}"
+            append: "{{ i > 0 }}"
+      loop: "{{ script_code | list | batch(chunk_size | int) | map('join') | list }}"
+      loop_control:
+        index_var: i
+        label: "chunk {{ i }}"
+      delegate_to: localhost
+
+    - name: Set run on startup
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          id: 1
+          method: Script.SetConfig
+          params:
+            id: "{{ script_id | int }}"
+            config:
+              enable: "{{ run_on_startup | bool }}"
+      delegate_to: localhost
+
+    - name: Start script
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc/Script.Start?id={{ script_id }}"
+      delegate_to: localhost
+      when: start_script | bool
+
+    - name: Verify script is running and set to start on boot
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc/Script.List"
+        return_content: true
+      register: verify
+      until: >-
+        verify.json.scripts | selectattr('id', 'equalto', script_id | int) | selectattr('running') | selectattr('enable', 'equalto', run_on_startup | bool) | list | length == 1
+      retries: 10
+      delay: 2
+      delegate_to: localhost
+      changed_when: false
+      when: start_script | bool
+
+    - name: Reboot test (optional)
+      when: (verify_reboot | bool) and (start_script | bool)
+      block:
+        - name: Reboot device
+          ansible.builtin.uri:
+            url: "http://{{ shelly_host }}/rpc/Shelly.Reboot"
+          delegate_to: localhost
+
+        - name: Wait for device to answer again
+          ansible.builtin.uri:
+            url: "http://{{ shelly_host }}/rpc/Shelly.GetDeviceInfo"
+          register: back
+          until: back.status == 200
+          retries: 30
+          delay: 3
+          delegate_to: localhost
+          changed_when: false
+
+        - name: Verify script started by itself after reboot
+          ansible.builtin.uri:
+            url: "http://{{ shelly_host }}/rpc/Script.List"
+            return_content: true
+          register: after_reboot
+          until: >-
+            after_reboot.json.scripts | selectattr('id', 'equalto', script_id | int) | selectattr('running') | list | length == 1
+          retries: 15
+          delay: 2
+          delegate_to: localhost
+          changed_when: false

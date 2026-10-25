@@ -1,0 +1,14 @@
+---
+# Copy to inventory.yml and adjust. inventory.yml is git-ignored.
+all:
+  children:
+    shelly_strips:
+      vars:
+        shelly_timezone: Europe/Copenhagen
+        shelly_disable_cloud: true
+        shelly_disable_ble: true
+      hosts:
+        strip-office:
+          ansible_host: 192.168.1.50
+        strip-workshop:
+          ansible_host: 192.168.1.51

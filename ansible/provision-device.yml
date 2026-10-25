@@ -1,0 +1,158 @@
+---
+# Enroll / baseline-configure a Shelly Gen2+ device via the RPC API.
+#
+# Usage:
+#   ansible-playbook -i inventory.yml provision-device.yml --limit strip-office
+#
+# What it does (all settings are variables, see ansible/README.md):
+#   - sets the device name and timezone
+#   - disables cloud and Bluetooth (default), optionally the Wi-Fi access point
+#   - reboots only if the device reports restart_required
+#   - optionally enables authentication (LAST step, see note below)
+#
+# Note on authentication: Shelly uses digest auth, which ansible.builtin.uri does not
+# support. Once auth is enabled, this playbook and deploy-script.yml can no longer
+# configure the device. Config tasks are therefore skipped on devices with auth enabled.
+
+- name: Provision Shelly device
+  hosts: shelly_strips
+  gather_facts: false
+  vars:
+    shelly_host: "{{ ansible_host | default(inventory_hostname) }}"
+    shelly_name: "{{ inventory_hostname }}"
+    shelly_timezone: Europe/Copenhagen
+    shelly_disable_cloud: true
+    shelly_disable_ble: true
+    # shelly_ap_enable: false          # set to false to disable the Wi-Fi access point (leave undefined to not touch it)
+    # shelly_auth_password: "{{ vault_shelly_password }}"   # set to enable authentication (user "admin")
+  tasks:
+    - name: Read device info
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc/Shelly.GetDeviceInfo"
+        return_content: true
+      register: info
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Show device
+      ansible.builtin.debug:
+        msg: "{{ info.json.id }} ({{ info.json.model }}, firmware {{ info.json.ver }}, auth enabled: {{ info.json.auth_en }})"
+
+    - name: Skip note for devices with authentication
+      ansible.builtin.debug:
+        msg: "Authentication is enabled on this device, configuration tasks are skipped."
+      when: info.json.auth_en
+
+    - name: Set device name and timezone
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          id: 1
+          method: Sys.SetConfig
+          params:
+            config:
+              device:
+                name: "{{ shelly_name }}"
+              location:
+                tz: "{{ shelly_timezone }}"
+        return_content: true
+      register: sys_res
+      delegate_to: localhost
+      when: not info.json.auth_en
+
+    - name: Configure cloud connection
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          id: 1
+          method: Cloud.SetConfig
+          params:
+            config:
+              enable: "{{ not (shelly_disable_cloud | bool) }}"
+        return_content: true
+      register: cloud_res
+      delegate_to: localhost
+      when: not info.json.auth_en
+
+    - name: Configure Bluetooth
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          id: 1
+          method: BLE.SetConfig
+          params:
+            config:
+              enable: "{{ not (shelly_disable_ble | bool) }}"
+        return_content: true
+      register: ble_res
+      delegate_to: localhost
+      when: not info.json.auth_en
+
+    - name: Configure Wi-Fi access point
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          id: 1
+          method: WiFi.SetConfig
+          params:
+            config:
+              ap:
+                enable: "{{ shelly_ap_enable | bool }}"
+        return_content: true
+      register: ap_res
+      delegate_to: localhost
+      when:
+        - not info.json.auth_en
+        - shelly_ap_enable is defined
+
+    - name: Check whether a restart is required
+      ansible.builtin.set_fact:
+        restart_needed: >-
+          {{ [sys_res, cloud_res, ble_res, ap_res]
+             | selectattr('json.restart_required', 'defined')
+             | selectattr('json.restart_required')
+             | list | length > 0 }}
+
+    - name: Reboot device
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc/Shelly.Reboot"
+      delegate_to: localhost
+      when: restart_needed | bool
+
+    - name: Wait for device to come back
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc/Shelly.GetDeviceInfo"
+      register: back
+      until: back.status == 200
+      retries: 30
+      delay: 2
+      delegate_to: localhost
+      changed_when: false
+      when: restart_needed | bool
+
+    - name: Enable authentication (last step)
+      ansible.builtin.uri:
+        url: "http://{{ shelly_host }}/rpc"
+        method: POST
+        body_format: json
+        body:
+          id: 1
+          method: Shelly.SetAuth
+          params:
+            user: admin
+            realm: "{{ info.json.id }}"
+            ha1: "{{ ('admin:' ~ info.json.id ~ ':' ~ shelly_auth_password) | hash('sha256') }}"
+      delegate_to: localhost
+      no_log: true
+      when:
+        - not info.json.auth_en
+        - shelly_auth_password is defined
+        - shelly_auth_password | length > 0
