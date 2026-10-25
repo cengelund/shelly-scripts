@@ -30,7 +30,7 @@ ansible-playbook -i inventory.yml deploy-script.yml --limit strip-office
 | `shelly_name` | inventory hostname | Device name (`Sys.SetConfig`) |
 | `shelly_timezone` | `Europe/Copenhagen` | Timezone (`Sys.SetConfig`) |
 | `shelly_disable_cloud` | `true` | Turn off the Shelly cloud connection |
-| `shelly_disable_ble` | `true` | Turn off Bluetooth |
+| `shelly_disable_ble` | `false` | Turn off Bluetooth. Keep it on for scripts that use BLU sensors, such as `blu-motion-trigger` |
 | `shelly_ap_enable` | not set | Set `false` to disable the Wi-Fi access point. Only do this once the device reliably joins your Wi-Fi, otherwise you can lock yourself out |
 | `shelly_auth_password` | not set | If set, enables authentication (user `admin`) as the last step. Store it with Ansible Vault |
 

@@ -7,6 +7,7 @@ A collection of [Shelly Script](https://shelly-api-docs.shelly.cloud/gen2/Script
 | Script | Device | Description |
 |---|---|---|
 | [power-follow](scripts/power-follow/) | Shelly Power Strip Gen4 | Slave slots follow the power draw of a master slot, with delays, minimum on-time, startup handling and periodic re-check |
+| [blu-motion-trigger](scripts/blu-motion-trigger/) | Shelly Power Strip Gen4 (any Gen2+ with Bluetooth) | A Shelly BLU Motion sensor switches slots, fully local, with lux threshold, off-delay, multiple sensors, RSSI filter, manual override and fail-safe |
 
 ## Repository layout
 

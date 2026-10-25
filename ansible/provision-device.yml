@@ -22,7 +22,7 @@
     shelly_name: "{{ inventory_hostname }}"
     shelly_timezone: Europe/Copenhagen
     shelly_disable_cloud: true
-    shelly_disable_ble: true
+    shelly_disable_ble: false
     # shelly_ap_enable: false          # set to false to disable the Wi-Fi access point (leave undefined to not touch it)
     # shelly_auth_password: "{{ vault_shelly_password }}"   # set to enable authentication (user "admin")
   tasks:

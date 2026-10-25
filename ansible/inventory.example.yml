@@ -6,7 +6,7 @@ all:
       vars:
         shelly_timezone: Europe/Copenhagen
         shelly_disable_cloud: true
-        shelly_disable_ble: true
+        shelly_disable_ble: false
       hosts:
         strip-office:
           ansible_host: 192.168.1.50
